@@ -1,0 +1,156 @@
+"use client"
+
+import { useState } from "react"
+import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+import { Camera, MapPin, Upload, X } from "lucide-react"
+import { cameraManager, type PhotoData } from "@/lib/camera"
+import { GeolocationManager, type LocationData } from "@/lib/geolocation"
+
+interface PhotoCaptureWithLocationProps {
+  onPhotoCapture: (photo: PhotoData) => void
+  onPhotoRemove: (photo: PhotoData) => void
+  photos: PhotoData[]
+  maxPhotos?: number
+  collectorId?: string
+  plantId?: string
+}
+
+export function PhotoCaptureWithLocation({ 
+  onPhotoCapture, 
+  onPhotoRemove, 
+  photos, 
+  maxPhotos = 3,
+  collectorId,
+  plantId
+}: PhotoCaptureWithLocationProps) {
+  const [isCapturing, setIsCapturing] = useState(false)
+  const [locationError, setLocationError] = useState<string | null>(null)
+  const geolocationManager = GeolocationManager.getInstance()
+
+  const handleFileCapture = async () => {
+    if (photos.length >= maxPhotos) return
+
+    setIsCapturing(true)
+    setLocationError(null)
+    
+    try {
+      // Capture photo first
+      const photo = await cameraManager.captureFromCamera({
+        type: 'normal',
+        intensity: 1.0
+      })
+      
+      // Add collector and plant IDs to the photo object
+      if (collectorId) photo.collectorId = collectorId
+      if (plantId) photo.plantId = plantId
+      
+      // Then get current location
+      try {
+        const location = await geolocationManager.getCurrentLocation()
+        
+        // Attach location data to the photo
+        const photoWithLocation: PhotoData = {
+          ...photo,
+          location: {
+            lat: location.lat,
+            lon: location.lon,
+            accuracy: location.accuracy,
+            timestamp: location.timestamp
+          },
+          timestamp: location.timestamp,
+          collectorId,
+          plantId
+        }
+        
+        onPhotoCapture(photoWithLocation)
+      } catch (locationError) {
+        console.error("Location capture failed:", locationError)
+        setLocationError("Could not attach location data to photo")
+        
+        // Still provide the photo without location
+        onPhotoCapture({
+          ...photo,
+          timestamp: new Date().toISOString(),
+          collectorId,
+          plantId
+        })
+      }
+    } catch (error) {
+      console.error("Photo capture failed:", error)
+      alert("Failed to capture photo. Please try again.")
+    } finally {
+      setIsCapturing(false)
+    }
+  }
+
+  const handleRemovePhoto = (photo: PhotoData) => {
+    cameraManager.revokePhotoUrl(photo.blobUrl)
+    onPhotoRemove(photo)
+  }
+
+  return (
+    <div className="space-y-3 sm:space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0">
+        <h3 className="text-base sm:text-lg font-medium">
+          Photos ({photos.length}/{maxPhotos})
+        </h3>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleFileCapture}
+          disabled={isCapturing || photos.length >= maxPhotos}
+          className="flex items-center gap-1.5 sm:gap-2 bg-transparent text-xs sm:text-sm h-8 sm:h-9 w-full sm:w-auto"
+        >
+          {isCapturing ? <Upload className="h-3.5 w-3.5 sm:h-4 sm:w-4 animate-spin" /> : <Camera className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
+          {isCapturing ? "Capturing..." : "Add Photo"}
+        </Button>
+      </div>
+
+      {locationError && (
+        <div className="text-sm text-amber-600 flex items-center gap-1 mt-1">
+          <MapPin className="h-3.5 w-3.5" />
+          <span>{locationError}</span>
+        </div>
+      )}
+
+      {photos.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-4">
+          {photos.map((photo, index) => (
+            <Card key={photo.hash} className="relative overflow-hidden">
+              <img
+                src={photo.blobUrl || "/placeholder.svg"}
+                alt={`Herb photo ${index + 1}`}
+                className="w-full aspect-square object-cover"
+              />
+              {photo.location && (
+                <div className="absolute bottom-1 left-1 bg-black/50 text-white text-xs px-1.5 py-0.5 rounded-sm flex items-center gap-1">
+                  <MapPin className="h-3 w-3" />
+                  <span>Geo-tagged</span>
+                </div>
+              )}
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                className="absolute top-1 sm:top-2 right-1 sm:right-2 h-5 w-5 sm:h-6 sm:w-6 p-0.5 sm:p-1"
+                onClick={() => handleRemovePhoto(photo)}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {photos.length === 0 && (
+        <Card className="border-dashed border-2 p-8 text-center">
+          <Camera className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+          <p className="text-muted-foreground">No photos added yet</p>
+          <p className="text-sm text-muted-foreground mt-1">Tap "Add Photo" to capture geo-tagged herb images</p>
+        </Card>
+      )}
+    </div>
+  )
+}
